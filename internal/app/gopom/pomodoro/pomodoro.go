@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"github.com/BartoszCoyote/GoPomodoro/internal/app/gopom/slack"
 	"github.com/spf13/viper"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/BartoszCoyote/GoPomodoro/internal/app/gopom/sound"
@@ -96,13 +100,30 @@ func (s *Subtask) work() bool {
 	defer s.progress.Finish()
 	defer s.finishSound.Play()
 
+	usr1channel := make(chan os.Signal, 1)
+	signal.Notify(usr1channel, syscall.SIGUSR1)
+
+	f, err := os.OpenFile("/tmp/pomodoro", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
 	for {
 		select {
-		case <-StdinChan:
+		case <-usr1channel:
 			return false
+		//case <-StdinChan:
+		//	return false
 		case <-time.After(1000 * time.Millisecond):
 			currentDuration := time.Now().Sub(s.progress.StartTime()).Milliseconds()
 			s.progress.SetCurrent(currentDuration)
+			os.Truncate("/tmp/pomodoro", 100)
+			_, err = fmt.Fprintf(f, "%02d:%02d", currentDuration/1000/60, currentDuration/1000)
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			if s.progress.Total() < currentDuration {
 				return true
 			}
@@ -154,6 +175,11 @@ func initStateMachine() *fsm.FSM {
 }
 
 func (p *Pomodoro) init() string {
+
+	usr1channel := make(chan os.Signal, 1)
+	signal.Notify(usr1channel, syscall.SIGUSR1)
+	<-usr1channel
+
 	taskStartupName := "Starting work on " + p.taskName
 	subtask := newSubtask(taskStartupName, 2, "/beep.mp3", p.workSoundVolume, "/placeholder.mp3", p.finishSoundVolume)
 	subtask.work()
@@ -208,11 +234,17 @@ func (p *Pomodoro) longRest() string {
 }
 
 func (p *Pomodoro) waitForUser() string {
-	waitForUser := viper.GetBool("ENABLE_WORK_CONTINUE")
-	if waitForUser {
-		fmt.Println("Press Enter to continue...")
-		<-StdinChan
-	}
+	//waitForUser := viper.GetBool("ENABLE_WORK_CONTINUE")
+	//if waitForUser {
+	//	fmt.Println("Press Enter to continue...")
+	//	<-StdinChan
+	//}
+
+	usr1channel := make(chan os.Signal, 1)
+	signal.Notify(usr1channel, syscall.SIGUSR1)
+	<-usr1channel
+
+	// write to file waiting
 
 	return WORK_RESUMED_EVENT
 }
